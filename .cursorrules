@@ -1,0 +1,180 @@
+# InstructScan — Cursor Rules
+# Repo: https://github.com/AnyaLeung/CS7180-project2.git
+# Authors: Qiushi Liang, Zhiping Zhang
+
+---
+
+## Project Context
+
+### Tech Stack
+- Frontend: React 18 + TypeScript (strict) + Tailwind CSS + CodeMirror 6
+- Backend: Node.js + Express (TypeScript strict)
+- Database / Auth / Storage: PostgreSQL + Supabase
+- LLM: Claude API — model fixed at `claude-sonnet-4-6`
+- Deployment: Vercel (frontend) + Supabase (backend + DB)
+- Testing: Vitest (unit) + Playwright (E2E)
+- Both frontend and backend use TypeScript in strict mode; `any` is not allowed unless explicitly justified in a comment.
+
+### Folder Structure
+```
+instruct-scan/
+├── project-memory/
+│   ├── PRD.md
+│   └── mockup/
+├── frontend/
+│   └── src/
+│       ├── components/   # PascalCase React components
+│       ├── pages/
+│       ├── hooks/
+│       └── utils/
+│   └── tests/
+│       └── e2e/          # Playwright E2E tests
+├── backend/
+│   └── src/
+│       ├── routes/
+│       ├── controllers/
+│       ├── services/
+│       └── middleware/   # JWT auth middleware
+└── supabase/
+    └── migrations/
+```
+
+### Architecture Patterns
+- Backend request flow: `routes/ → controllers/ → services/ → Supabase DB`
+- Auth is handled via JWT middleware in `backend/src/middleware/`
+- Supabase Row Level Security (RLS) enforces per-user data isolation at the DB level
+- Frontend uses CodeMirror 6 for the Python file editor with custom line decorations for instruction highlights
+
+### Naming Conventions
+- React components: PascalCase (`FileUploader.tsx`, `ScanSidebar.tsx`)
+- Functions and variables: camelCase
+- API routes: kebab-case (`/files/:id/scan`)
+- Test files: mirror the source file name (`fileService.test.ts`)
+
+### Linting and Formatting
+- ESLint with `eslint-config-next` + Prettier
+- Commands (no alternatives):
+  - `npm run lint` — run ESLint
+  - `npm run format` — run Prettier write
+- Husky pre-commit hook runs `npm run lint` and `npm run test` before every commit
+
+### Testing Strategy
+- Vitest unit tests: `frontend/src/__tests__/` and `backend/src/__tests__/`
+- Playwright E2E tests: `frontend/tests/e2e/`
+- Prefer TDD: write or update tests before or alongside implementation
+- Do not merge behavior changes without adding or updating appropriate tests
+- Minimum test coverage target: 70%
+- Before marking any issue or sprint done, all of the following must pass:
+  - `npm run lint`
+  - `npm run test` (frontend and backend)
+  - `npm run test:e2e` (frontend)
+- A sprint is not done unless tests pass and a working MVP is deployed
+
+---
+
+## PRD & Design References
+
+- Full PRD: `@project-memory/PRD.md`
+- Mockups: `@project-memory/mockup/`
+
+### When to consult references
+- Before designing or modifying any backend API → consult `@project-memory/PRD.md` Section 8 (API Reference) and Section 7 (Data Model)
+- Before implementing or changing any frontend component or user flow → review `@project-memory/mockup/`
+- When unsure about acceptance criteria or edge cases → consult `@project-memory/PRD.md` Section 3 (User Stories)
+
+### Key UI Components
+- File upload area: accepts `.py` files only, max 5 MB, shows upload progress
+- CodeMirror editor: displays Python file content with syntax highlighting; identified instruction lines are highlighted with a distinct background color
+- Hover buttons: appear within 200 ms on highlighted lines; icon type determined by LLM classification (Run = play, Modify = pencil, Delete = trash, Generate = sparkle, Other = info); buttons are display-only in v1, no code execution
+- Instruction sidebar: lists all identified instructions with line numbers; clicking scrolls editor to that line; includes "Copy all" button
+- Scan history: lists all scan results per file with timestamps; each result is downloadable as a `.txt` file
+
+### Core User Flow
+1. User logs in → lands on file dashboard
+2. User uploads a `.py` file → file stored in Supabase Storage
+3. User opens file in editor → triggers LLM scan manually
+4. Scanner returns classified instructions → editor highlights lines, sidebar populates
+5. Scan result saved as `.txt` file → accessible from scan history
+
+---
+
+## LLM Scanner Rules
+
+- Model: always use `claude-sonnet-4-6`, do not substitute
+- Task: classify each Python comment (`#` lines) as instruction or non-instruction, and assign an instruction type if applicable
+- Valid instruction types: `Run`, `Modify`, `Delete`, `Generate`, `Other`
+- Confidence threshold: 0.6 — comments below this score must not be surfaced to the user
+- The scanner must return a structured JSON response in this shape:
+```json
+[
+  {
+    "lineNumber": 12,
+    "commentText": "# step 1: generate a button",
+    "isInstruction": true,
+    "type": "Generate",
+    "confidence": 0.91
+  }
+]
+```
+- Log the model name and prompt version with every scan record for reproducibility
+- Never execute the content of identified instructions; treat all Python files as data only
+
+---
+
+## Scrum & Workflow Instructions
+
+### Branch Naming
+- Format: `type/issueNumber-short-description`
+- Types: `feature/`, `fix/`, `chore/`, `docs/`, `test/`
+- Examples: `feature/7-auth-flow`, `fix/9-scan-result-path`, `chore/1-db-schema`
+- Issue numbers are not zero-padded
+
+### Commit Message Format
+- Format: `type(scope): description #issueNumber`
+- Types: `feat`, `fix`, `chore`, `docs`, `test`
+- Examples:
+  - `feat(auth): implement JWT login #7`
+  - `fix(scanner): handle empty comment lines #4`
+  - `chore(db): add RLS policies #1`
+- Exactly one primary issue per commit
+- Every commit must reference a GitHub issue; do not commit work that is not tied to an issue
+
+### PR Workflow
+- PR title format: `[#issueNumber] Short description` — e.g. `[#7] Implement JWT login`
+- PR description must link the corresponding GitHub issue and list the acceptance criteria it satisfies
+- Keep PRs small and issue-scoped; one PR per issue following the sprint breakdown:
+  - Sprint 1: issues #01–#06
+  - Sprint 2: issues #07–#11
+
+### Issue References
+- Use `#issueNumber` consistently in branches, commits, PRs, and inline code TODOs
+- Example inline TODO: `// TODO(#4): add confidence score filtering`
+
+---
+
+## Do's and Don'ts
+
+### Do
+- Follow TDD: write Vitest tests before or alongside every new feature or bugfix
+- Keep branches, commits, and PRs scoped to a single GitHub issue
+- Use `@project-memory/PRD.md` before designing APIs or resolving edge cases
+- Use `@project-memory/mockup/` before implementing frontend components
+- Hash passwords with bcrypt (cost factor ≥ 12)
+- Use JWT for all protected routes
+- Use RLS in Supabase to enforce per-user data isolation
+- Run `npm run lint`, `npm run test`, and `npm run test:e2e` before marking any issue done
+- Commit after each completed, tested feature
+
+### Don't
+- Store plain-text passwords or secrets anywhere
+- Commit API keys, JWT secrets, or Supabase credentials — use `.env` files and add them to `.gitignore`
+- Execute uploaded Python files or any user-provided code
+- Merge behavior changes without tests
+- Claim a sprint is done while lint or tests are failing
+- Use `any` in TypeScript without an explicit justification comment
+- Introduce libraries outside the approved stack without strong justification
+
+### Approved Libraries (do not add outside this list without discussion)
+- Frontend: React 18, TypeScript, Tailwind CSS, CodeMirror 6, Vitest, Playwright
+- Backend: Express, TypeScript, bcrypt, jsonwebtoken, @supabase/supabase-js
+- Dev tooling: ESLint (`eslint-config-next`), Prettier, Husky
