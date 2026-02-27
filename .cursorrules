@@ -50,6 +50,7 @@ instruct-scan/
 - Functions and variables: camelCase
 - API routes: kebab-case (`/files/:id/scan`)
 - Test files: mirror the source file name (`fileService.test.ts`)
+- API response bodies must use camelCase. Map database snake_case fields (e.g., size_bytes, uploaded_at) to camelCase equivalents (sizeBytes, uploadedAt) at the controller layer.
 
 ### Linting and Formatting
 - ESLint with `eslint-config-next` + Prettier
@@ -64,6 +65,7 @@ instruct-scan/
 - Prefer TDD: write or update tests before or alongside implementation
 - Do not merge behavior changes without adding or updating appropriate tests
 - Minimum test coverage target: 70%
+- Always include a test case for unauthenticated requests (missing or invalid JWT) for every protected endpoint.
 - Before marking any issue or sprint done, all of the following must pass:
   - `npm run lint`
   - `npm run test` (frontend and backend)
