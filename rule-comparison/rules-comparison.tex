@@ -1,0 +1,281 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.85in]{geometry}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{parskip}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{makecell}
+
+\setlength{\parskip}{4pt}
+
+\lstdefinestyle{code}{
+  backgroundcolor=\color{gray!8},
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{gray!40},
+  xleftmargin=4pt,
+  xrightmargin=4pt,
+  aboveskip=6pt,
+  belowskip=6pt,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  literate={→}{$\rightarrow$}1 {←}{$\leftarrow$}1 {✓}{\checkmark}1 {✗}{$\times$}1
+}
+\lstset{style=code}
+
+\title{Rules File Comparison Report}
+\author{Qiushi Liang, Zhiping Zhang}
+\date{February 27, 2026}
+
+\begin{document}
+\maketitle
+
+\noindent\textbf{Feature tested:} Issue \#4 --- Secure \texttt{.py} File Upload\\
+\textbf{Branches:} \texttt{test/with-rules} vs \texttt{test/no-rules}
+
+\section{Code Quality and Consistency with Project Patterns}
+
+\subsection{Architecture --- Request Flow}
+
+The \texttt{.cursorrules} file specifies a strict layered architecture: \texttt{routes/ → controllers/ → services/ → Supabase DB}.
+
+\textbf{With Rules} --- follows the prescribed pattern exactly, including a centralized types file and auth middleware:
+
+\begin{lstlisting}
+backend/src/
+  types/index.ts            <- Centralized type definitions
+  lib/supabase.ts           <- Supabase client
+  middleware/auth.ts        <- JWT authentication
+  routes/files.ts           <- Route definitions
+  controllers/fileController.ts
+  services/fileService.ts   <- Validation + Storage + DB write
+\end{lstlisting}
+
+\textbf{Without Rules} --- similar layering but with a different structure. No auth middleware, no centralized types, no database write:
+
+\begin{lstlisting}
+backend/src/
+  config/supabase.ts        <- Supabase client (different folder name)
+  middleware/upload.ts       <- Multer config (no auth)
+  middleware/errorHandler.ts <- Multer error handler
+  routes/fileRoutes.ts      <- Route definitions (different file name)
+  controllers/fileController.ts
+  services/fileService.ts   <- Storage only, no DB write
+  app.ts                    <- Separate Express app file
+\end{lstlisting}
+
+\textbf{Key difference:} The with-rules version includes a complete data pipeline (validate → upload to Storage → write to DB → return mapped response). The no-rules version stops at Storage upload and never persists file metadata to the database.
+
+\subsection{Authentication}
+
+The \texttt{.cursorrules} requires JWT for all protected routes and specifies: \textit{``Always include a test case for unauthenticated requests for every protected endpoint.''}
+
+\textbf{With Rules} --- complete JWT middleware:
+
+\begin{lstlisting}[language=Java]
+// backend/src/middleware/auth.ts (WITH rules)
+export function authenticate(req, res, next): void {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Missing or invalid authorization header' });
+    return;
+  }
+  const token = authHeader.split(' ')[1];
+  const secret = process.env.JWT_SECRET ?? '';
+  try {
+    const decoded = jwt.verify(token, secret) as JwtPayload;
+    req.user = decoded;
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+\end{lstlisting}
+
+\textbf{Without Rules} --- no auth middleware at all. The controller hard-codes a fallback user:
+
+\begin{lstlisting}[language=Java]
+// backend/src/controllers/fileController.ts (WITHOUT rules)
+// TODO(#7): Extract userId from JWT token via auth middleware
+const userId = (req as Request & { userId?: string }).userId ?? 'anonymous';
+\end{lstlisting}
+
+\subsection{Type Safety}
+
+\textbf{With Rules} --- centralized type definitions in \texttt{types/index.ts} with interfaces for \texttt{JwtPayload}, \texttt{AuthenticatedRequest}, \texttt{FileRecord}, and \texttt{FileUploadResponse}.
+
+\textbf{Without Rules} --- no centralized type file. Types are scattered across individual files, and \texttt{Request} is cast inline with ad-hoc type extensions.
+
+\subsection{Database Interaction and Rollback}
+
+\textbf{With Rules} --- writes a record to the \texttt{files} table after uploading, and rolls back the Storage upload if the DB insert fails:
+
+\begin{lstlisting}[language=Java]
+// backend/src/services/fileService.ts (WITH rules)
+const { data, error: dbError } = await supabase
+  .from('files')
+  .insert({ id: uniqueId, user_id: userId, file_name: originalName,
+            storage_path: storagePath, size_bytes: buffer.length })
+  .select().single();
+
+if (dbError) {
+  await supabase.storage.from(STORAGE_BUCKET).remove([storagePath]);
+  throw new Error(`Database insert failed: ${dbError.message}`);
+}
+\end{lstlisting}
+
+\textbf{Without Rules} --- only uploads to Storage. No database persistence, no rollback logic.
+
+\subsection{File Validation --- Empty File Handling}
+
+\textbf{With Rules} --- validates against empty (0-byte) files with a dedicated check.
+\textbf{Without Rules} --- no empty file check exists anywhere in the codebase.
+
+\section{Design/Mockup Intent}
+
+The \texttt{.cursorrules} references \texttt{project-memory/mockup.jpg} and specifies a layout with a file sidebar on the left, a code editor in the center, and an instructions panel on the right. The mockup uses a dark theme with purple accent colors.
+
+\subsection{Overall Layout}
+
+\textbf{With Rules} --- three-section layout matching the mockup (header with nav tabs + sidebar + main area):
+
+\begin{lstlisting}[language=HTML]
+<!-- frontend/src/App.tsx (WITH rules) -->
+<header> InstructScan | [Editor] [History] [Settings] </header>
+<div class="flex">
+  <FileUploader />        <!-- Left sidebar with file list -->
+  <main class="flex-1">   <!-- Center editor area -->
+</div>
+\end{lstlisting}
+
+\textbf{Without Rules} --- simple centered layout, no sidebar, no navigation tabs:
+
+\begin{lstlisting}[language=HTML]
+<!-- frontend/src/App.tsx (WITHOUT rules) -->
+<header> InstructScan </header>
+<main class="flex items-center justify-center">
+  <FileUploader />   <!-- Centered upload area only -->
+</main>
+\end{lstlisting}
+
+\subsection{File List Sidebar}
+
+\textbf{With Rules} --- dedicated file list matching the mockup: a \texttt{FILES} heading, scrollable list of uploaded filenames, selected file highlighted with \texttt{border-purple-500}.
+
+\textbf{Without Rules} --- no file list at all. The component is a standalone upload area with no concept of browsing previously uploaded files.
+
+\subsection{Brand Color}
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lccc}
+\toprule
+\textbf{Element} & \textbf{Mockup} & \textbf{With Rules} & \textbf{Without Rules} \\
+\midrule
+Logo          & Purple & \texttt{purple-400} & \texttt{indigo-400} \\
+Active tab    & Purple & \texttt{purple-600} & (no tabs) \\
+Selected file & Purple & \texttt{purple-500} & (no file list) \\
+Progress bar  & ---    & \texttt{purple-500} & \texttt{indigo-500} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Adherence to Naming Conventions and Architecture}
+
+\subsection{File and Route Naming}
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lllp{4.5cm}}
+\toprule
+\textbf{Item} & \textbf{With Rules} & \textbf{Without Rules} & \textbf{Convention} \\
+\midrule
+Route file       & \texttt{routes/files.ts}  & \texttt{routes/fileRoutes.ts} & Folder already implies ``routes'' \\
+Supabase client  & \texttt{lib/supabase.ts}  & \texttt{config/supabase.ts}   & Rules specify \texttt{lib/} \\
+Type definitions & \texttt{types/index.ts}   & (none)                        & Rules require centralized types \\
+API path         & \texttt{/api/files}       & \texttt{/files/upload}        & Rules require \texttt{/api} prefix \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{API Response Field Naming}
+
+The \texttt{.cursorrules} states: \textit{``API response bodies must use camelCase. Map database snake\_case fields to camelCase equivalents at the controller layer.''}
+
+\textbf{With Rules:} \texttt{\{"fileName": "main.py", "sizeBytes": 1024, "uploadedAt": "..."\}} --- all camelCase.
+
+\textbf{Without Rules:} \texttt{\{"filename": "main.py", "storagePath": "...", "sizeBytes": 1024\}} --- \texttt{filename} is all lowercase, breaking the convention.
+
+\subsection{Frontend Component Architecture}
+
+\textbf{With Rules} --- upload logic extracted into a reusable hook (\texttt{hooks/useFileUpload.ts}), with the \texttt{FileUploader} component receiving state via props. Three files with clear separation: component, hook, API utility.
+
+\textbf{Without Rules} --- all logic embedded directly in the component (287 lines of mixed UI and state). Only two files: component and API utility.
+
+\subsection{Commit Message Format}
+
+\texttt{.cursorrules} specifies: \texttt{type(scope): description \#issueNumber}.
+
+\textbf{With Rules:} \texttt{feat(upload): implement secure .py file upload with rules \#4} --- has scope, references issue.
+
+\textbf{Without Rules:} \texttt{feat: implement .py file upload without rules} --- missing scope, no issue reference.
+
+\section{Quality of Tests Generated}
+
+\subsection{Test Count Summary}
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lcc}
+\toprule
+\textbf{Area} & \textbf{With Rules} & \textbf{Without Rules} \\
+\midrule
+Backend --- file validation    & 8  & 7  \\
+Backend --- auth middleware    & 5  & 0 (no auth) \\
+Backend --- controller         & 0  & 4  \\
+Backend --- upload middleware  & 0  & 10 \\
+Frontend --- FileUploader     & 9  & 14 \\
+\midrule
+\textbf{Total}                & \textbf{22} & \textbf{35} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Unauthenticated Request Testing}
+
+\textbf{With Rules} --- 4 dedicated auth failure tests: missing header, wrong scheme (\texttt{Basic}), invalid token, expired token. All return 401.
+
+\textbf{Without Rules} --- no authentication tests exist because auth was never implemented. The closest test verifies fallback to \texttt{'anonymous'} --- a significant security gap.
+
+\subsection{Frontend Test Approach}
+
+Both test suites are competent. The with-rules tests verify \textbf{file list and selection behavior} (unique to the mockup-aware implementation), while the without-rules tests focus on \textbf{upload state transitions} in the standalone component.
+
+\section{Summary}
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lp{3.5cm}p{3.5cm}l}
+\toprule
+\textbf{Dimension} & \textbf{With Rules} & \textbf{Without Rules} & \textbf{Verdict} \\
+\midrule
+Architecture      & Strict layering, auth, DB write, rollback & Similar but no auth, no DB & With rules \\
+Mockup fidelity   & 3-panel layout, purple theme, nav tabs    & Centered upload, indigo    & With rules \\
+Naming            & Consistent camelCase, \texttt{/api} prefix & \texttt{filename}, no prefix & With rules \\
+Tests             & 22, with auth coverage                    & 35, but no auth tests      & Tie \\
+Empty file check  & Yes                                       & No                         & With rules \\
+Error rollback    & Yes                                       & No                         & With rules \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection*{Conclusion}
+
+The \texttt{.cursorrules} file produced a measurably better result across every dimension. Authentication was entirely skipped without rules; the mockup was ignored; naming inconsistencies appeared (\texttt{filename} vs \texttt{fileName}); and database persistence was missing. The rules file acted as a comprehensive specification that kept the AI aligned with project conventions, security requirements, and design intent that it would otherwise have no way to infer from a brief prompt alone.
+
+\end{document}
